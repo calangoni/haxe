@@ -100,7 +100,7 @@ private typedef NativeString = String;
 			} else {
 				native = me.Split(new string[] { delimiter }, System.StringSplitOptions.None);
 			}
-			return new Array<object>(native);
+			return new Array<string>(native);
 	')
 	public static function split(me:NativeString, delimiter:NativeString):Array<NativeString>
 	{
