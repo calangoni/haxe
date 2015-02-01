@@ -64,16 +64,16 @@ class NativeInput extends Input
 		return stream.CanSeek;
 	}
 
-	public function seek( p : Int, pos : sys.io.FileSeek ) : Void
+	public function seek( p : Int64, pos : sys.io.FileSeek ) : Void
 	{
-		var p = switch(pos)
+		var po = switch(pos)
 		{
 			case SeekBegin: cs.system.io.SeekOrigin.Begin;
 			case SeekCur: cs.system.io.SeekOrigin.Current;
 			case SeekEnd: cs.system.io.SeekOrigin.End;
 		};
 
-		stream.Seek(cast(p, Int64), p);
+		stream.Seek(p, po);
 	}
 
 	public function tell() : Int
