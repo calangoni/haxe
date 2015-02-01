@@ -855,10 +855,10 @@ let configure gen =
 				Hashtbl.mem ifaces cl.cl_path ->
 					TInst(Hashtbl.find ifaces cl.cl_path, [])
 			| TEnum(e, params) ->
-				TEnum(e, List.map (fun _ -> t_dynamic) params)
+				TEnum(e, params)
 			| TInst(cl, params) when Meta.has Meta.Enum cl.cl_meta ->
-				TInst(cl, List.map (fun _ -> t_dynamic) params)
-			| TInst(cl, params) -> TInst(cl, change_param_type (TClassDecl cl) params)
+				TInst(cl, params)
+			| TInst(cl, params) -> TInst(cl, params)
 			| TType({ t_path = ([], "Null") }, [t]) ->
 				(*
 					Null<> handling is a little tricky.
@@ -913,9 +913,9 @@ let configure gen =
 				dynamic_anon
 		in
 		if is_hxgeneric && List.exists (fun t -> match follow t with | TDynamic _ -> true | _ -> false) tl then
-			List.map (fun _ -> t_dynamic) tl
+			List.map (fun t -> t) tl
 		else
-			List.map ret tl
+			List.map (fun t -> t) tl
 	in
 
 	let is_dynamic t = match real_type t with
