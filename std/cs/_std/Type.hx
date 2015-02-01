@@ -279,7 +279,7 @@ using StringTools;
 	}
 
 	@:functionCode('
-		Array<object> ret = new Array<object>();
+		Array<string> ret = new Array<string>();
 
 		if (c == typeof(string))
 		{
