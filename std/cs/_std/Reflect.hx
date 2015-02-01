@@ -118,13 +118,13 @@ import cs.internal.Function;
 	@:functionCode('
 		if (o is haxe.lang.IHxObject)
 		{
-			Array<object> ret = new Array<object>();
+			Array<string> ret = new Array<string>();
 				((haxe.lang.IHxObject) o).__hx_getFields(ret);
 			return ret;
 		} else if (o is System.Type) {
 			return Type.getClassFields( (System.Type) o);
 		} else {
-			return new Array<object>();
+			return new Array<string>();
 		}
 	')
 	public static function fields( o : Dynamic ) : Array<String>
