@@ -332,14 +332,10 @@ let create_directory com ldir =
  	(List.iter (fun p -> atm_path := !atm_path ^ "/" ^ p; if not (Sys.file_exists !atm_path) then (Unix.mkdir !atm_path 0o755);) ldir)
 
 let write_resource dir name data =
-	let i = ref 0 in
-	String.iter (fun c ->
-		if c = '\\' || c = '/' || c = ':' || c = '*' || c = '?' || c = '"' || c = '<' || c = '>' || c = '|' then String.blit "_" 0 name !i 1;
-		incr i
-	) name;
 	let rdir = dir ^ "/res" in
 	if not (Sys.file_exists dir) then Unix.mkdir dir 0o755;
 	if not (Sys.file_exists rdir) then Unix.mkdir rdir 0o755;
+	let name = Codegen.escape_res_name name false in
 	let ch = open_out_bin (rdir ^ "/" ^ name) in
 	output_string ch data;
 	close_out ch
@@ -593,6 +589,8 @@ and gen_call ctx e el =
 	| TLocal { v_name = "__php__" }, [{ eexpr = TConst (TString code) }] ->
 		(*--php-prefix*)
 		spr ctx (prefix_init_replace ctx.com code)
+	| TLocal { v_name = "__php__" }, { eexpr = TConst (TString code); epos = p } :: tl ->
+		Codegen.interpolate_code ctx.com code tl (spr ctx) (gen_expr ctx) p
 	| TLocal { v_name = "__instanceof__" },  [e1;{ eexpr = TConst (TString t) }] ->
 		gen_value ctx e1;
 		print ctx " instanceof %s" t;
@@ -1311,9 +1309,7 @@ and gen_expr ctx e =
 			end) in
 		let remaining = ref (List.length el) in
 		let build e =
-			(match e.eexpr with
-			| TBlock [] -> ()
-			| _ -> newline ctx);
+			newline ctx;
 			if (in_block && !remaining = 1) then begin
 				(match e.eexpr with
 				| TIf _

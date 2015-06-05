@@ -81,7 +81,7 @@ abstract Vector<T>(VectorData<T>) {
 		If `index` is negative or exceeds `this.length`, the result is
 		unspecified.
 	**/
-	@:arrayAccess public inline function get(index:Int):T {
+	@:op([]) public inline function get(index:Int):T {
 		#if cpp
 		return this.unsafeGet(index);
 		#elseif python
@@ -97,7 +97,7 @@ abstract Vector<T>(VectorData<T>) {
 		If `index` is negative or exceeds `this.length`, the result is
 		unspecified.
 	**/
-	@:arrayAccess public inline function set(index:Int, val:T):T {
+	@:op([]) public inline function set(index:Int, val:T):T {
 		#if cpp
 		return this.unsafeSet(index,val);
 		#elseif python
@@ -205,7 +205,7 @@ abstract Vector<T>(VectorData<T>) {
 	static public inline function fromArrayCopy<T>(array:Array<T>):Vector<T> {
 		#if python
 		return cast array.copy();
-		#elseif flash9
+		#elseif flash10
 		return fromData(flash.Vector.ofArray(array));
 		#elseif java
 		return fromData(java.Lib.nativeArray(array,false));

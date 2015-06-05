@@ -27,6 +27,7 @@ import haxe.macro.Type.VarAccess;
 import haxe.macro.Context;
 using haxe.macro.TypeTools;
 #end
+using Lambda;
 
 private typedef SqlFunction = {
 	var name : String;
@@ -121,8 +122,18 @@ class RecordMacros {
 		#end
 	}
 
-	public dynamic function resolveType( name : String ) : haxe.macro.Type {
+	public dynamic function resolveType( name : String, ?module : String ) : haxe.macro.Type {
 		#if macro
+		if (module != null)
+		{
+			var m = Context.getModule(module);
+			for (t in m)
+			{
+				if (t.toString() == name)
+					return t;
+			}
+		}
+
 		return Context.getType(name);
 		#else
 		throw "not implemented";
@@ -282,6 +293,7 @@ class RecordMacros {
 			relations : [],
 			indexes : [],
 		};
+		g.cache.set(cname, i);
 		var c = c.get();
 		var fieldsPos = new haxe.ds.StringMap();
 		var fields = c.fields.get();
@@ -315,10 +327,12 @@ class RecordMacros {
 						isNull = false;
 						var t = makeRecord(f.type);
 						if( t == null ) error("Relation type should be a sys.db.Object", f.pos);
+						var mod = t.get().module;
 						var r = {
 							prop : f.name,
 							key : params.shift().i,
 							type : t.toString(),
+							module : mod,
 							cascade : false,
 							lock : false,
 							isNull : isNull,
@@ -352,6 +366,16 @@ class RecordMacros {
 			default: fi.name == "id";
 			}
 			if( isId ) {
+				switch(fi.t)
+				{
+					case DInt:
+						fi.t = DId;
+					case DUInt:
+						fi.t = DUId;
+					case DBigInt:
+						fi.t = DBigId;
+					case _:
+				}
 				if( i.key == null ) i.key = [fi.name] else error("Multiple table id declaration", f.pos);
 			}
 			i.fields.push(fi);
@@ -359,8 +383,11 @@ class RecordMacros {
 		}
 		// create fields for undeclared relations keys :
 		for( r in i.relations ) {
+			var field = fields.find(function(f) return f.name == r.prop);
 			var f = i.hfields.get(r.key);
-			var relatedInf = getRecordInfos(makeRecord(resolveType(r.type)));
+			var relatedInf = getRecordInfos(makeRecord(resolveType(r.type, r.module)));
+			if (relatedInf.key.length > 1)
+				error('The relation ${r.prop} is invalid: Type ${r.type} has multiple keys, which is not supported',field.pos);
 			var relatedKey = relatedInf.key[0];
 			var relatedKeyType = switch(relatedInf.hfields.get(relatedKey).t)
 				{
@@ -368,7 +395,7 @@ class RecordMacros {
 					case DUId: DUInt;
 					case DBigId: DBigInt;
 					case t = DString(_): t;
-					default: throw "Unexpected id type, use either SId, SUId, SBigID or SString";
+					case t: error('Unexpected id type $t for the relation. Use either SId, SInt, SUId, SUInt, SBigID, SBigInt or SString', field.pos);
 				}
 
 			if( f == null ) {
@@ -397,6 +424,20 @@ class RecordMacros {
 					i.key.push(id);
 				}
 				if( i.key.length == 0 ) error("Invalid :id", m.pos);
+				if (i.key.length == 1 )
+				{
+					var field = i.hfields.get(i.key[0]);
+					switch(field.t)
+					{
+						case DInt:
+							field.t = DId;
+						case DUInt:
+							field.t = DUId;
+						case DBigInt:
+							field.t = DBigId;
+						case _:
+					}
+				}
 			case ":index":
 				var idx = [];
 				for( p in m.params ) idx.push(makeIdent(p));
@@ -419,7 +460,6 @@ class RecordMacros {
 		// check primary key defined
 		if( i.key == null )
 			error("Table is missing unique id, use either SId, SUId, SBigID or @:id", c.pos);
-		g.cache.set(cname, i);
 		return i;
 	}
 
