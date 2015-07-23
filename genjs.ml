@@ -938,6 +938,11 @@ let check_field_name c f =
 		error ("The field name '" ^ f.cf_name ^ "'  is not allowed in JS") (match f.cf_expr with None -> c.cl_pos | Some e -> e.epos);
 	| _ -> ()
 
+(* convert a.b.c to ["a"]["b"]["c"] *)
+let path_to_brackets path =
+	let parts = ExtString.String.nsplit path "." in
+	"[\"" ^ (String.concat "\"][\"" parts) ^ "\"]"
+
 let gen_class_static_field ctx c f =
 	match f.cf_expr with
 	| None | Some { eexpr = TConst TNull } when not (has_feature ctx "Type.getClassFields") ->
@@ -954,7 +959,7 @@ let gen_class_static_field ctx c f =
 			let dot_path = (dot_path c.cl_path) ^ (static_field c f.cf_name) in
 			ctx.id_counter <- 0;
 			print ctx "%s = " path;
-			(match (get_exposed ctx dot_path f.cf_meta) with [s] -> print ctx "$hx_exports.%s = " s | _ -> ());
+			(match (get_exposed ctx dot_path f.cf_meta) with [s] -> print ctx "$hx_exports%s = " (path_to_brackets s) | _ -> ());
 			gen_value ctx e;
 			newline ctx;
 		| _ ->
@@ -1007,7 +1012,7 @@ let generate_class ctx c =
 		print ctx "%s = " p
 	else
 		print ctx "%s = $hxClasses[\"%s\"] = " p (dot_path c.cl_path);
-	(match (get_exposed ctx (dot_path c.cl_path) c.cl_meta) with [s] -> print ctx "$hx_exports.%s = " s | _ -> ());
+	(match (get_exposed ctx (dot_path c.cl_path) c.cl_meta) with [s] -> print ctx "$hx_exports%s = " (path_to_brackets s) | _ -> ());
 	(match c.cl_kind with
 		| KAbstractImpl _ ->
 			(* abstract implementations only contain static members and don't need to have constructor functions *)
@@ -1245,7 +1250,7 @@ let generate com =
 	| Some g -> g()
 	| None ->
 	let ctx = alloc_ctx com in
-
+	Codegen.map_source_header com (fun s -> print ctx "// %s\n" s);
 	if has_feature ctx "Class" || has_feature ctx "Type.getClassName" then add_feature ctx "js.Boot.isClass";
 	if has_feature ctx "Enum" || has_feature ctx "Type.getEnumName" then add_feature ctx "js.Boot.isEnum";
 
@@ -1282,6 +1287,16 @@ let generate com =
 		in loop parts "";
 	)) exposed;
 
+	let include_files = List.rev com.include_files in
+
+	List.iter (fun file ->
+		match file with
+		| path, "top" ->
+			let file_content = Std.input_file ~bin:true (fst file) in
+			print ctx "%s\n" file_content;
+			()
+		| _ -> ()
+	) include_files;
 
 	let closureArgs = [] in
 	let closureArgs = if (anyExposed && not (Common.defined com Define.ShallowExpose)) then
@@ -1320,7 +1335,7 @@ let generate com =
 		print ctx "(function (%s) { \"use strict\"" (String.concat ", " (List.map fst closureArgs));
 		newline ctx;
 		let rec print_obj f root = (
-			let path = root ^ "." ^ f.os_name in
+			let path = root ^ (path_to_brackets f.os_name) in
 			print ctx "%s = %s || {}" path path;
 			ctx.separator <- true;
 			newline ctx;
@@ -1329,6 +1344,15 @@ let generate com =
 		in
 		List.iter (fun f -> print_obj f "$hx_exports") exposedObject.os_fields;
 	end;
+
+	List.iter (fun file ->
+		match file with
+		| path, "closure" ->
+			let file_content = Std.input_file ~bin:true (fst file) in
+			print ctx "%s\n" file_content;
+			()
+		| _ -> ()
+	) include_files;
 
 	(* If ctx.js_modern, console is defined in closureArgs. *)
 	if (not ctx.js_modern) && (not (Common.defined com Define.JsEs5)) then
@@ -1394,12 +1418,12 @@ let generate com =
 		newline ctx;
 		if (anyExposed && (Common.defined com Define.ShallowExpose)) then (
 			List.iter (fun f ->
-				print ctx "var %s = $hx_exports.%s" f.os_name f.os_name;
+				print ctx "var %s = $hx_exports%s" f.os_name (path_to_brackets f.os_name);
 				ctx.separator <- true;
 				newline ctx
 			) exposedObject.os_fields;
 			List.iter (fun f ->
-				print ctx "var %s = $hx_exports.%s" f f;
+				print ctx "var %s = $hx_exports%s" f (path_to_brackets f);
 				ctx.separator <- true;
 				newline ctx
 			) !toplevelExposed

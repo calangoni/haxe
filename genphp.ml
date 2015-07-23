@@ -307,8 +307,11 @@ let is_keyword n =
 	| "include_once" | "isset" | "list" | "namespace" | "print" | "require" | "require_once"
 	| "unset" | "use" | "__function__" | "__class__" | "__method__" | "final"
 	| "php_user_filter" | "protected" | "abstract" | "__set" | "__get" | "__call"
-	| "clone" | "instanceof" | "break" | "case" | "class" | "continue" | "default" | "do" | "else" | "extends" | "for" | "function" | "if" | "new" | "return" | "static" | "switch" | "var" | "while" | "interface" | "implements" | "public" | "private" | "try" | "catch" | "throw" -> true
-	| "goto"
+	| "clone" | "instanceof" | "break" | "case" | "class" | "continue" | "default"
+	| "do" | "else" | "extends" | "for" | "function" | "if" | "new" | "return"
+	| "static" | "switch" | "var" | "while" | "interface" | "implements" | "public"
+	| "private" | "try" | "catch" | "throw" | "goto"
+		-> true
 	| _ -> false
 
 let s_ident n =
@@ -361,7 +364,7 @@ let init com cwd path def_type =
 	let ch = open_out (String.concat "/" dir ^ "/" ^ (filename path) ^ (if def_type = 0 then ".class" else if def_type = 1 then ".enum"  else if def_type = 2 then ".interface" else ".extern") ^ ".php") in
 	let imports = Hashtbl.create 0 in
 	Hashtbl.add imports (snd path) [fst path];
-	{
+	let ctx = {
 		com = com;
 		stack = stack_init com false;
 		tabs = "";
@@ -390,7 +393,10 @@ let init com cwd path def_type =
 		inline_index = 0;
 		in_block = false;
 		lib_path = match com.php_lib with None -> "lib" | Some s -> s;
-	}
+	} in
+	Codegen.map_source_header com (fun s -> print ctx "// %s\n" s);
+	ctx
+
 let unsupported msg p = error ("This expression cannot be generated to PHP: " ^ msg) p
 
 let newline ctx =
@@ -886,25 +892,32 @@ and gen_inline_function ctx f hasthis p =
 	ctx.in_value <- Some "closure";
 
 	let args a = List.map (fun (v,_) -> v.v_name) a in
-	let arguments = ref [] in
 
-	if hasthis then begin arguments := "this" :: !arguments end;
+	let used_locals = ref PMap.empty in
 
-	PMap.iter (fun n _ -> arguments := !arguments @ [n]) old_li;
+	let rec loop e = match e.eexpr with
+		| TLocal v when not (start_with v.v_name "__hx__") && PMap.mem v.v_name old_l ->
+			used_locals := PMap.add v.v_name v.v_name !used_locals
+		| _ ->
+			Type.iter loop e
+	in
+	loop f.tf_expr;
 
 	spr ctx "array(new _hx_lambda(array(";
 
 	let c = ref 0 in
 
-	List.iter (fun a ->
+	let print_arg a =
 		if !c > 0 then spr ctx ", ";
 		incr c;
 		print ctx "&$%s" a;
-	) (remove_internals !arguments);
+	in
+	if hasthis then print_arg "this";
+	PMap.iter (fun _ a -> print_arg a) !used_locals;
 
 	spr ctx "), \"";
 
-	spr ctx (inline_function ctx (args f.tf_args) hasthis (fun_block ctx f p));
+	spr ctx (inline_function ctx (args f.tf_args) hasthis !used_locals (fun_block ctx f p));
 	print ctx "\"), 'execute')";
 
 	ctx.in_value <- old;
@@ -1680,7 +1693,7 @@ and inline_block ctx e =
 
 		ctx.inline_methods <- ctx.inline_methods @ [block]
 
-and inline_function ctx args hasthis e =
+and inline_function ctx args hasthis used_args e =
 		let index = ctx.inline_index in
 		ctx.inline_index <- ctx.inline_index + 1;
 		let block = {
@@ -1689,9 +1702,9 @@ and inline_function ctx args hasthis e =
 			ihasthis = hasthis; (* param this *)
 			iarguments = args;
 			iexpr = e;
-			ilocals = ctx.locals;
+			ilocals = used_args;
 			iin_block = false;
-			iinv_locals = ctx.inv_locals;
+			iinv_locals = used_args;
 		} in
 
 		ctx.inline_methods <- ctx.inline_methods @ [block];

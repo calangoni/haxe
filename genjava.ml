@@ -1525,8 +1525,9 @@ let configure gen =
 							write w "case ";
 							in_value := true;
 							(match e.eexpr with
-								| TField(_,FEnum(e,ef)) ->
-									write w ef.ef_name
+								| TField(_, FEnum(e, ef)) ->
+									let changed_name = change_id ef.ef_name in
+									write w changed_name
 								| _ ->
 									expr_s w e);
 							write w ":";
@@ -1993,6 +1994,7 @@ let configure gen =
 	in
 
 	let module_type_gen w md_tp =
+		Codegen.map_source_header gen.gcon (fun s -> print w "// %s\n" s);
 		match md_tp with
 			| TClassDecl cl ->
 				if not cl.cl_extern then begin

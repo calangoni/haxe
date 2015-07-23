@@ -25,6 +25,7 @@ private typedef Promise = {
 		-browsers <browsers>		A list of browsers to test with in JSON format. Default: refer to source code
 
 	When a test finishes, it should set `window.success` to a boolean.
+	For urls with the string `-es5`, IE <= 8 will be automatically skipped.
 */
 class RunSauceLabs {
 	static function successMsg(msg:String):Void {
@@ -35,6 +36,12 @@ class RunSauceLabs {
 	}
 	static function infoMsg(msg:String):Void {
 		console.log('\x1b[36m' + msg + '\x1b[0m');
+	}
+
+	static function isEs5(b:Dynamic):Bool {
+		return 
+			// not IE <= 8
+			!(b.browserName == "internet explorer" && Std.parseInt(b.version) <= 8);
 	}
 
 	static function main():Void {
@@ -163,7 +170,7 @@ class RunSauceLabs {
 			tags.push("TravisCI");
 
 		var maxDuration = 60 * 5; //5 min
-		var commandTimeout = 30;  //30s
+		var commandTimeout = 60;  //60s
 
 		function testBrowser(caps:Dynamic, trials = 3):Dynamic {
 			console.log('========================================================');
@@ -211,6 +218,11 @@ class RunSauceLabs {
 			}
 
 			var browserSuccess = true;
+			var urls = if (!isEs5(caps)) {
+				urls.filter(function(url:String) return url.indexOf("-es5") < 0);
+			} else {
+				urls;
+			}
 
 			return browser
 				.init(caps)

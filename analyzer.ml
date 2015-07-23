@@ -365,6 +365,7 @@ module Simplifier = struct
 				let e1 = match e1.eexpr with
 					| TFunction _ -> loop e1
 					| TArrayDecl [{eexpr = TFunction _}] -> loop e1
+					| TNew(_,_,el) when not (List.exists Optimizer.has_side_effect el) -> loop e1 (* issue #4322 *)
 					| _ -> bind ~allow_tlocal:true e1
 				in
 				{e with eexpr = TVar(v,Some e1)}
@@ -780,11 +781,13 @@ module Ssa = struct
 
 	let apply_cond ctx = function
 		| Equal(v,e1) ->
-			let v' = assign_var ctx (get_origin_var v) (mk_loc v e1.epos) e1.epos in
-			append_cond ctx v' (Equal(v',e1)) e1.epos
+			(* let v' = assign_var ctx (get_origin_var v) (mk_loc v e1.epos) e1.epos in
+			append_cond ctx v' (Equal(v',e1)) e1.epos *)
+			()
 		| NotEqual(v,e1) ->
-			let v' = assign_var ctx (get_origin_var v) (mk_loc v e1.epos) e1.epos in
-			append_cond ctx v' (NotEqual(v',e1)) e1.epos
+			(* let v' = assign_var ctx (get_origin_var v) (mk_loc v e1.epos) e1.epos in
+			append_cond ctx v' (NotEqual(v',e1)) e1.epos *)
+			()
 
 	let apply_not_null_cond ctx v p =
 		apply_cond ctx (NotEqual(v,(mk (TConst TNull) t_dynamic p)))
@@ -894,13 +897,8 @@ module Ssa = struct
 						close join;
 						Some e
 					| None ->
-						begin match e1.eexpr with
-							| TMeta((Meta.Exhaustive,_,_),_)
-							| TParenthesis({eexpr = TMeta((Meta.Exhaustive,_,_),_)}) ->
-								()
-							| _ ->
-								add_branch join ctx.cur_data e.epos;
-						end;
+						if not (Optimizer.is_exhaustive e1) then
+							add_branch join ctx.cur_data e.epos;
 						None
 				in
 				close_join_node ctx join e.epos;
@@ -1043,7 +1041,7 @@ module ConstPropagation = struct
 		with Not_found ->
 			-1
 
-	let can_be_inlined com v0 e = type_iseq v0.v_type e.etype && match e.eexpr with
+	let rec can_be_inlined com v0 e = type_iseq_strict v0.v_type e.etype && match e.eexpr with
 		| TConst ct ->
 			begin match ct with
 				| TThis | TSuper -> false
@@ -1067,6 +1065,9 @@ module ConstPropagation = struct
 			Ssa.get_var_usage_count v0 <= 1
 		| TField(_,FEnum _) ->
 			Ssa.get_var_usage_count v0 <= 1
+		| TCast(e1,None) ->
+			(* We can inline an unsafe cast if the variable is only used once. *)
+			can_be_inlined com v0 {e1 with etype = e.etype} && Ssa.get_var_usage_count v0 <= 1
 		| _ ->
 			false
 
@@ -1637,7 +1638,7 @@ module Run = struct
 					if config.check_has_effect then EffectChecker.run com is_var_expression e;
 					let e,ssa = with_timer "analyzer-ssa-apply" (fun () -> Ssa.apply com e) in
 					let e = if config.const_propagation then with_timer "analyzer-const-propagation" (fun () -> ConstPropagation.apply ssa e) else e in
-					let e = if config.check then with_timer "analyzer-checker" (fun () -> Checker.apply ssa e) else e in
+					(* let e = if config.check then with_timer "analyzer-checker" (fun () -> Checker.apply ssa e) else e in *)
 					let e = if config.local_dce && config.analyzer_use && not has_unbound && not is_var_expression then with_timer "analyzer-local-dce" (fun () -> LocalDce.apply e) else e in
 					let e = if config.ssa_unapply then with_timer "analyzer-ssa-unapply" (fun () -> Ssa.unapply com e) else e in
 					List.iter (fun f -> f()) ssa.Ssa.cleanup;

@@ -616,13 +616,39 @@ class RunCi {
 					changeDirectory(sysDir);
 					runCommand("haxe", ["compile-cpp.hxml"]);
 					runCpp("bin/cpp/Main-debug", []);
+
+					if (Sys.systemName() == "Mac")
+					{
+						changeDirectory(miscDir + "cppObjc");
+						runCommand("haxe", ["build.hxml"]);
+						runCpp("bin/TestObjc-debug");
+					}
 				case Js:
 					getJSDependencies();
 
-					for (flatten in [true, false]) {
-						runCommand("haxe", ["compile-js.hxml"].concat(flatten ? [] : ["-D", "js-unflatten"]));
-						runCommand("node", ["-e", "var unit = require('./bin/unit.js').unit; unit.Test.main(); process.exit(unit.Test.success ? 0 : 1);"]);
-					}
+					var jsOutputs = [
+						for (es5 in [[], ["-D", "js-es5"]])
+						for (unflatten in [[], ["-D", "js-unflatten"]])
+						{
+							var extras = [].concat(es5).concat(unflatten);
+
+							runCommand("haxe", ["compile-js.hxml"].concat(extras));
+
+							var output = if (extras.length > 0) {
+								"bin/js/" + extras.join("") + "/unit.js";
+							} else {
+								"bin/js/default/unit.js";
+							}
+							var outputDir = Path.directory(output);
+							if (!FileSystem.exists(outputDir)) {
+								FileSystem.createDirectory(outputDir);
+							}
+							FileSystem.rename("bin/unit.js", output);
+							FileSystem.rename("bin/unit.js.map", output + ".map");
+							runCommand("node", ["-e", "var unit = require('./" + output + "').unit; unit.Test.main(); process.exit(unit.Test.success ? 0 : 1);"]);
+							output;
+						}
+					];
 
 					if (Sys.getEnv("TRAVIS_SECURE_ENV_VARS") == "true" && systemName == "Linux") {
 						var scVersion = "sc-4.3-linux";
@@ -643,7 +669,7 @@ class RunCi {
 						haxelibInstallGit("dionjwa", "nodejs-std", "master", null, true, "nodejs");
 						runCommand("haxe", ["compile-saucelabs-runner.hxml"]);
 						var server = new Process("nekotools", ["server"]);
-						runCommand("node", ["bin/RunSauceLabs.js", "unit-js.html"]);
+						runCommand("node", ["bin/RunSauceLabs.js"].concat([for (js in jsOutputs) "unit-js.html?js=" + js.urlEncode()]));
 
 						server.close();
 						sc.close();
