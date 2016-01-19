@@ -51,37 +51,45 @@ class RunSauceLabs {
 		var connectPort = "4445";
 		var urls = [];
 
+		// hide "Stop running this script?" dialogs
+		// https://support.saucelabs.com/customer/portal/articles/2057026-how-to-hide-%22stop-running-this-script-%22-dialogs
+		var hideLongRunningScriptWarning = "https://support.saucelabs.com/customer/portal/kb_article_attachments/59514/original.bat";
+
 		//https://saucelabs.com/platforms
 		var browsers:Array<Dynamic> = [
 			// {
 			// 	"browserName": "internet explorer",
 			// 	"platform": "Windows XP",
-			// 	"version": "6"
+			// 	"version": "6.0",
+			//  "prerun": hideLongRunningScriptWarning
 			// },
 			// {
 			// 	"browserName": "internet explorer",
 			// 	"platform": "Windows XP",
-			// 	"version": "7"
+			// 	"version": "7.0",
+			//  "prerun": hideLongRunningScriptWarning
 			// },
 			{
 				"browserName": "internet explorer",
 				"platform": "Windows XP",
-				"version": "8"
+				"version": "8.0",
+				"prerun": hideLongRunningScriptWarning
 			},
 			{
 				"browserName": "internet explorer",
 				"platform": "Windows 7",
-				"version": "9"
+				"version": "9.0",
+				"prerun": hideLongRunningScriptWarning
 			},
 			{
 				"browserName": "internet explorer",
 				"platform": "Windows 7",
-				"version": "10"
+				"version": "10.0"
 			},
 			{
 				"browserName": "internet explorer",
 				"platform": "Windows 8.1",
-				"version": "11"
+				"version": "11.0"
 			},
 			{
 				"browserName": "chrome",
@@ -93,23 +101,23 @@ class RunSauceLabs {
 			},
 			{
 				"browserName": "safari",
-				"platform": "OS X 10.6",
-				"version": "5"
-			},
-			{
-				"browserName": "safari",
 				"platform": "OS X 10.8",
-				"version": "6"
+				"version": "6.0"
 			},
 			{
 				"browserName": "safari",
 				"platform": "OS X 10.9",
-				"version": "7"
+				"version": "7.0"
 			},
 			{
 				"browserName": "safari",
 				"platform": "OS X 10.10",
-				"version": "8"
+				"version": "8.0"
+			},
+			{
+				"browserName": "safari",
+				"platform": "OS X 10.11",
+				"version": "9.0"
 			},
 			{
 				"browserName": "iphone",
@@ -197,8 +205,7 @@ class RunSauceLabs {
 						.sauceJobUpdate({ passed: true, tags: tags.concat(["errored"]) })
 						.then(function() return browser.quit())
 						.timeout(commandTimeout * 1000)
-						.fail(onErrored)
-						.then(function() return testBrowser(caps, trials));
+						.fin(function() return testBrowser(caps, trials));
 				} else {
 					allSuccess = false;
 					return null;
@@ -274,9 +281,9 @@ class RunSauceLabs {
 				})
 				.then(function()
 					return browser.sauceJobUpdate({ passed: browserSuccess }))
+				.fail(onErrored)
 				.then(function()
-					return browser.quit())
-				.fail(onErrored);
+					return browser.quit());
 		}
 
 		browsers
@@ -285,6 +292,9 @@ class RunSauceLabs {
 			}, q())
 			.then(function() {
 				Sys.exit(allSuccess ? 0 : 1);
+			})
+			.fail(function() {
+				Sys.exit(1);
 			});
 	}
 }

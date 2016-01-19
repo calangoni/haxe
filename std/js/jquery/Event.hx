@@ -1,8 +1,8 @@
 /* This file is generated, do not edit! Visit http://api.jquery.com/ for API documentation. */
 package js.jquery;
-@:final @:native("$.Event") extern class Event extends js.html.Event {
+@:native("$.Event") extern class Event extends js.html.Event {
 	/**
-		An optional object of data passed to an event method when the current executing handler is bound.  
+		An optional object of data passed to an event method when the current executing handler is bound.
 	**/
 	public var data : Dynamic;
 	/**
@@ -10,15 +10,15 @@ package js.jquery;
 	**/
 	public var delegateTarget : js.html.Element;
 	/**
-		Returns whether <a href="/event.preventDefault/">event.preventDefault()</a> was ever called on this event object. 
+		Returns whether <a href="/event.preventDefault/">event.preventDefault()</a> was ever called on this event object.
 	**/
 	public function isDefaultPrevented():Bool;
 	/**
-		  Returns whether event.stopImmediatePropagation() was ever called on this event object. 
+		Returns whether event.stopImmediatePropagation() was ever called on this event object.
 	**/
 	public function isImmediatePropagationStopped():Bool;
 	/**
-		  Returns whether <a href="/event.stopPropagation/">event.stopPropagation()</a> was ever called on this event object. 
+		Returns whether <a href="/event.stopPropagation/">event.stopPropagation()</a> was ever called on this event object.
 	**/
 	public function isPropagationStopped():Bool;
 	/**
@@ -49,4 +49,22 @@ package js.jquery;
 		For key or mouse events, this property indicates the specific key or button that was pressed.
 	**/
 	public var which : Float;
+	public var altKey : Bool;
+	public var button : Int;
+	public var buttons : Int;
+	public var char : Int;
+	public var charCode : Int;
+	public var clientX : Int;
+	public var clientY : Int;
+	public var ctrlKey : Bool;
+	public var detail : Int;
+	public var key : String;
+	public var keyCode : Int;
+	public var offsetX : Int;
+	public var offsetY : Int;
+	public var screenX : Int;
+	public var screenY : Int;
+	public var shiftKey : Bool;
+	public var toElement : js.html.Element;
+	public var view : js.html.Window;
 }
