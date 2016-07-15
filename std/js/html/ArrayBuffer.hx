@@ -20,22 +20,20 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-// This file is generated from typedarray.webidl line 12:0. Do not edit!
+// This file is generated from typedarray.webidl line 13:0. Do not edit!
 
 package js.html;
+
+// Explicitly include the compatibility class
+import js.html.compat.ArrayBuffer;
 
 @:native("ArrayBuffer")
 extern class ArrayBuffer
 {
 	static function isView( value : Dynamic ) : Bool;
 	var byteLength(default,null) : Int;
-
+	
 	/** @throws DOMError */
 	function new( length : Int ) : Void;
 	function slice( begin : Int, ?end : Int ) : ArrayBuffer;
-
-	public var length(get, never):Int;
-	public inline function get_length():Int {
-		return byteLength;
-	}
 }
