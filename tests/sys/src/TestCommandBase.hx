@@ -2,6 +2,7 @@ import sys.*;
 import haxe.io.*;
 
 class TestCommandBase extends haxe.unit.TestCase {
+	var runInfo:{out:String, err:String} = null;
 	function run(cmd:String, ?args:Array<String>):Int {
 		throw "should be overridden";
 	}
@@ -19,7 +20,7 @@ class TestCommandBase extends haxe.unit.TestCase {
 
 		var exitCode =
 			#if (macro || interp)
-				run(Sys.executablePath(), ["compile-each.hxml", "--run", "TestArguments"].concat(args));
+				run("haxe", ["compile-each.hxml", "--run", "TestArguments"].concat(args));
 			#elseif cpp
 				run(bin, args);
 			#elseif cs
@@ -34,9 +35,14 @@ class TestCommandBase extends haxe.unit.TestCase {
 			#elseif python
 				run(python.lib.Sys.executable, [bin].concat(args));
 			#elseif neko
-				run(Sys.executablePath(), [bin].concat(args));
+				run("neko", [bin].concat(args));
 			#elseif php
 				run(untyped __php__("defined('PHP_BINARY') ? PHP_BINARY : 'php'"), [bin].concat(args));
+			#elseif lua
+				switch(Sys.getEnv("LUA")){
+					case null : run("lua", [bin].concat(args));
+					default   : run(Sys.getEnv("LUA"), [bin].concat(args));
+				};
 			#else
 				-1;
 			#end
@@ -45,7 +51,7 @@ class TestCommandBase extends haxe.unit.TestCase {
 		assertEquals(0, exitCode);
 	}
 
-	function testCommandName() {		
+	function testCommandName() {
 		var binExt = switch (Sys.systemName()) {
 			case "Windows":
 				".exe";
@@ -99,7 +105,7 @@ class TestCommandBase extends haxe.unit.TestCase {
 			var args = [Std.string(code)];
 			var exitCode =
 				#if (macro || interp)
-					run(Sys.executablePath(), ["compile-each.hxml", "--run", "ExitCode"].concat(args));
+					run("haxe", ["compile-each.hxml", "--run", "ExitCode"].concat(args));
 				#elseif cpp
 					run(bin, args);
 				#elseif cs
@@ -114,12 +120,20 @@ class TestCommandBase extends haxe.unit.TestCase {
 				#elseif python
 					run(python.lib.Sys.executable, [bin].concat(args));
 				#elseif neko
-					run(Sys.executablePath(), [bin].concat(args));
+					run("neko", [bin].concat(args));
 				#elseif php
 					run(untyped __php__("defined('PHP_BINARY') ? PHP_BINARY : 'php'"), [bin].concat(args));
+				#elseif lua
+					switch(Sys.getEnv("LUA")){
+						case null: run("lua", [bin].concat(args));
+						default : run(Sys.getEnv("LUA"), [bin].concat(args));
+					};
 				#else
 					-1;
 				#end
+			if ((code != exitCode) && (runInfo != null)) {
+				trace(runInfo);
+			}
 			assertEquals(code, exitCode);
 		}
 	}
