@@ -54,6 +54,7 @@ let keep_whole_class dce c =
 	|| super_forces_keep c
 	|| (match c with
 		| { cl_path = ([],("Math"|"Array"))} when dce.com.platform = Js -> false
+		| { cl_path = ([],("Math"|"Array"|"String"))} when dce.com.platform = Lua -> false
 		| { cl_extern = true }
 		| { cl_path = ["flash";"_Boot"],"RealBoot" } -> true
 		| { cl_path = [],"String" }
@@ -569,7 +570,7 @@ let run com main full =
 	let dce = {
 		com = com;
 		full = full;
-		std_dirs = if full then [] else List.map Common.unique_full_path com.std_path;
+		std_dirs = if full then [] else List.map Path.unique_full_path com.std_path;
 		debug = Common.defined com Define.DceDebug;
 		added_fields = [];
 		follow_expr = expr;
@@ -608,7 +609,7 @@ let run com main full =
 			begin match c.cl_init with
 				| Some e when keep_class || Meta.has Meta.KeepInit c.cl_meta ->
 					(* create a fake field to deal with our internal logic (issue #3286) *)
-					let cf = mk_field "__init__" e.etype e.epos in
+					let cf = mk_field "__init__" e.etype e.epos null_pos in
 					cf.cf_expr <- Some e;
 					loop true cf
 				| _ ->

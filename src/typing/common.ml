@@ -22,7 +22,6 @@ open Type
 
 type package_rule =
 	| Forbidden
-	| Directory of string
 	| Remap of string
 
 type pos = Ast.pos
@@ -90,16 +89,119 @@ type platform_config = {
 	pf_reserved_type_paths : path list;
 }
 
-type display_mode =
-	| DMNone
-	| DMDefault
-	| DMUsage
-	| DMPosition
-	| DMToplevel
-	| DMResolve of string
-	| DMType
-	| DMModuleSymbols
-	| DMDiagnostics
+module DisplayMode = struct
+	type t =
+		| DMNone
+		| DMField
+		| DMUsage of bool (* true = also report definition *)
+		| DMPosition
+		| DMToplevel
+		| DMResolve of string
+		| DMPackage
+		| DMType
+		| DMModuleSymbols of string option
+		| DMDiagnostics of bool (* true = global, false = only in display file *)
+		| DMStatistics
+		| DMSignature
+
+	type error_policy =
+		| EPIgnore
+		| EPCollect
+		| EPShow
+
+	type display_file_policy =
+		| DFPOnly
+		| DFPAlso
+		| DFPNo
+
+	type settings = {
+		dms_kind : t;
+		dms_display : bool;
+		dms_full_typing : bool;
+		dms_force_macro_typing : bool;
+		dms_error_policy : error_policy;
+		dms_collect_data : bool;
+		dms_check_core_api : bool;
+		dms_inline : bool;
+		dms_display_file_policy : display_file_policy;
+		dms_exit_during_typing : bool;
+	}
+
+	let default_display_settings = {
+		dms_kind = DMField;
+		dms_display = true;
+		dms_full_typing = false;
+		dms_force_macro_typing = false;
+		dms_error_policy = EPIgnore;
+		dms_collect_data = false;
+		dms_check_core_api = false;
+		dms_inline = false;
+		dms_display_file_policy = DFPOnly;
+		dms_exit_during_typing = true;
+	}
+
+	let default_compilation_settings = {
+		dms_kind = DMNone;
+		dms_display = false;
+		dms_full_typing = true;
+		dms_force_macro_typing = true;
+		dms_error_policy = EPShow;
+		dms_collect_data = false;
+		dms_check_core_api = true;
+		dms_inline = true;
+		dms_display_file_policy = DFPNo;
+		dms_exit_during_typing = false;
+	}
+
+	let create dm =
+		let settings = { default_display_settings with dms_kind = dm } in
+		match dm with
+		| DMNone -> default_compilation_settings
+		| DMField | DMPosition | DMResolve _ | DMPackage | DMType | DMSignature -> settings
+		| DMUsage _ -> { settings with
+				dms_full_typing = true;
+				dms_collect_data = true;
+				dms_display_file_policy = DFPAlso;
+				dms_exit_during_typing = false
+			}
+		| DMToplevel -> { settings with dms_full_typing = true; }
+		| DMModuleSymbols filter -> { settings with
+				dms_display_file_policy = if filter = None then DFPOnly else DFPNo;
+				dms_exit_during_typing = false;
+				dms_force_macro_typing = false;
+			}
+		| DMDiagnostics global -> { settings with
+				dms_full_typing = true;
+				dms_error_policy = EPCollect;
+				dms_collect_data = true;
+				dms_inline = true;
+				dms_display_file_policy = if global then DFPNo else DFPAlso;
+				dms_exit_during_typing = false;
+			}
+		| DMStatistics -> { settings with
+				dms_full_typing = true;
+				dms_collect_data = true;
+				dms_inline = false;
+				dms_display_file_policy = DFPAlso;
+				dms_exit_during_typing = false
+			}
+
+	let to_string = function
+		| DMNone -> "none"
+		| DMField -> "field"
+		| DMPosition -> "position"
+		| DMResolve s -> "resolve " ^ s
+		| DMPackage -> "package"
+		| DMType -> "type"
+		| DMUsage true -> "rename"
+		| DMUsage false -> "references"
+		| DMToplevel -> "toplevel"
+		| DMModuleSymbols None -> "module-symbols"
+		| DMModuleSymbols (Some s) -> "workspace-symbols " ^ s
+		| DMDiagnostics b -> (if b then "global " else "") ^ "diagnostics"
+		| DMStatistics -> "statistics"
+		| DMSignature -> "signature"
+end
 
 type compiler_callback = {
 	mutable after_typing : (module_type list -> unit) list;
@@ -113,40 +215,31 @@ module IdentifierType = struct
 		| ITMember of tclass * tclass_field
 		| ITStatic of tclass * tclass_field
 		| ITEnum of tenum * tenum_field
+		| ITEnumAbstract of tabstract * tclass_field
 		| ITGlobal of module_type * string * Type.t
 		| ITType of module_type
 		| ITPackage of string
 
 	let get_name = function
 		| ITLocal v -> v.v_name
-		| ITMember(_,cf) | ITStatic(_,cf) -> cf.cf_name
+		| ITMember(_,cf) | ITStatic(_,cf) | ITEnumAbstract(_,cf) -> cf.cf_name
 		| ITEnum(_,ef) -> ef.ef_name
 		| ITGlobal(_,s,_) -> s
 		| ITType mt -> snd (t_infos mt).mt_path
 		| ITPackage s -> s
 end
 
-module DiagnosticsSeverity = struct
-	type t =
-		| Error
-		| Warning
-		| Information
-		| Hint
-
-	let to_int = function
-		| Error -> 1
-		| Warning -> 2
-		| Information -> 3
-		| Hint -> 4
-end
-
 type shared_display_information = {
-	mutable import_positions : (pos,bool ref) PMap.t;
-	mutable diagnostics_messages : (string * pos * DiagnosticsSeverity.t) list;
+	mutable import_positions : (pos,bool ref * placed_name list) PMap.t;
+	mutable diagnostics_messages : (string * pos * DisplayTypes.DiagnosticsSeverity.t) list;
+	mutable type_hints : (pos,Type.t) Hashtbl.t;
+	mutable document_symbols : (string * DisplayTypes.SymbolInformation.t DynArray.t) list;
+	mutable removable_code : (string * pos * pos) list;
 }
 
 type display_information = {
 	mutable unresolved_identifiers : (string * pos * (string * IdentifierType.t) list) list;
+	mutable interface_field_implementations : (tclass * tclass_field * tclass * tclass_field option) list;
 }
 
 (* This information is shared between normal and macro context. *)
@@ -161,7 +254,7 @@ type context = {
 	shared : shared_context;
 	display_information : display_information;
 	mutable sys_args : string list;
-	mutable display : display_mode;
+	mutable display : DisplayMode.settings;
 	mutable debug : bool;
 	mutable verbose : bool;
 	mutable foptimize : bool;
@@ -211,11 +304,11 @@ type context = {
 
 exception Abort of string * Ast.pos
 
-let display_default = ref DMNone
+let display_default = ref DisplayMode.DMNone
 
 type cache = {
 	mutable c_haxelib : (string list, string list) Hashtbl.t;
-	mutable c_files : (string, float * Ast.package) Hashtbl.t;
+	mutable c_files : ((string * string), float * Ast.package) Hashtbl.t;
 	mutable c_modules : (path * string, module_def) Hashtbl.t;
 }
 
@@ -270,6 +363,7 @@ module Define = struct
 		| LuaVer
 		| LuaJit
 		| Macro
+		| MacroDebug
 		| MacroTimes
 		| NekoSource
 		| NekoV1
@@ -362,6 +456,7 @@ module Define = struct
 		| LuaJit -> ("lua_jit","Enable the jit compiler for lua (version 5.2 only")
 		| LuaVer -> ("lua_ver","The lua version to target")
 		| Macro -> ("macro","Defined when code is compiled in the macro context")
+		| MacroDebug -> ("macro_debug","Show warnings for potential macro problems (e.g. macro-in-macro calls)")
 		| MacroTimes -> ("macro_times","Display per-macro timing when used with --times")
 		| NetVer -> ("net_ver", "<version:20-45> Sets the .NET version to be targeted")
 		| NetTarget -> ("net_target", "<name> Sets the .NET target. Defaults to \"net\". xbox, micro (Micro Framework), compact (Compact Framework) are some valid values")
@@ -406,6 +501,32 @@ module Define = struct
 		| Vcproj -> ("vcproj","GenCPP internal")
 		| Last -> assert false
 end
+
+let platforms = [
+	Js;
+	Lua;
+	Neko;
+	Flash;
+	Php;
+	Cpp;
+	Cs;
+	Java;
+	Python;
+	Hl;
+]
+
+let platform_name = function
+	| Cross -> "cross"
+	| Js -> "js"
+	| Lua -> "lua"
+	| Neko -> "neko"
+	| Flash -> "flash"
+	| Php -> "php"
+	| Cpp -> "cpp"
+	| Cs -> "cs"
+	| Java -> "java"
+	| Python -> "python"
+	| Hl -> "hl"
 
 module MetaInfo = struct
 	open Meta
@@ -460,7 +581,7 @@ module MetaInfo = struct
 		| Dce -> ":dce",("Forces dead code elimination even when -dce full is not specified",[UsedOnEither [TClass;TEnum]])
 		| Debug -> ":debug",("Forces debug information to be generated into the Swf even without -debug",[UsedOnEither [TClass;TClassField]; Platform Flash])
 		| Decl -> ":decl",("",[Platform Cpp])
-		| DefParam -> ":defParam",("?",[])
+		| DefParam -> ":defParam",("Default function argument value loaded from the SWF and used for documentation in Genxml",[Platform Flash;Internal])
 		| Delegate -> ":delegate",("Automatically added by -net-lib on delegates",[Platform Cs; UsedOn TAbstract])
 		| Depend -> ":depend",("",[Platform Cpp])
 		| Deprecated -> ":deprecated",("Mark a type or field as deprecated",[])
@@ -502,7 +623,7 @@ module MetaInfo = struct
 		| PythonImport -> ":pythonImport",("Generates python import statement for extern classes",[Platforms [Python]; UsedOn TClass])
 		| ImplicitCast -> ":implicitCast",("Generated automatically on the AST when an implicit abstract cast happens",[Internal; UsedOn TExpr])
 		| Include -> ":include",("",[Platform Cpp])
-		| InitPackage -> ":initPackage",("?",[])
+		| InitPackage -> ":initPackage",("Some weird thing for Genjs we want to remove someday",[Internal; Platform Js])
 		| InlineConstructorVariable -> ":inlineConstructorVariable",("Internally used to mark variables that come from inlined constructors",[Internal])
 		| Meta.Internal -> ":internal",("Generates the annotated field/class with 'internal' access",[Platforms [Java;Cs]; UsedOnEither[TClass;TEnum;TClassField]])
 		| IsVar -> ":isVar",("Forces a physical field to be generated for properties that otherwise would not require one",[UsedOn TClassField])
@@ -518,6 +639,7 @@ module MetaInfo = struct
 		| Macro -> ":macro",("(deprecated)",[])
 		| MaybeUsed -> ":maybeUsed",("Internally used by DCE to mark fields that might be kept",[Internal])
 		| MergeBlock -> ":mergeBlock",("Merge the annotated block into the current scope",[UsedOn TExpr])
+		| MultiReturn -> ":multiReturn",("Annotates an extern class as the result of multi-return function",[UsedOn TClass; Platform Lua])
 		| MultiType -> ":multiType",("Specifies that an abstract chooses its this-type from its @:to functions",[UsedOn TAbstract; HasParam "Relevant type parameters"])
 		| Native -> ":native",("Rewrites the path of a class or enum during generation",[HasParam "Output type path";UsedOnEither [TClass;TEnum]])
 		| NativeChildren -> ":nativeChildren",("Annotates that all children from a type should be treated as if it were an extern definition - platform native",[Platforms [Java;Cs]; UsedOn TClass])
@@ -538,16 +660,17 @@ module MetaInfo = struct
 		| NoUsing -> ":noUsing",("Prevents a field from being used with 'using'",[UsedOn TClassField])
 		| Ns -> ":ns",("Internally used by the Swf generator to handle namespaces",[Platform Flash])
 		| Objc -> ":objc",("Declares a class or interface that is used to interoperate with Objective-C code",[Platform Cpp;UsedOn TClass])
+		| ObjcProtocol -> ":objcProtocol",("Associates an interface with, or describes a function in, a native Objective-C protocol.",[Platform Cpp;UsedOnEither [TClass;TClassField] ])
 		| Op -> ":op",("Declares an abstract field as being an operator overload",[HasParam "The operation";UsedOn TAbstractField])
 		| Optional -> ":optional",("Marks the field of a structure as optional",[UsedOn TClassField])
 		| Overload -> ":overload",("Allows the field to be called with different argument types",[HasParam "Function specification (no expression)";UsedOn TClassField])
 		| PhpConstants -> ":phpConstants",("Marks the static fields of a class as PHP constants, without $",[Platform Php;UsedOn TClass])
 		| PhpGlobal -> ":phpGlobal",("Puts the static fields of a class in the global PHP namespace",[Platform Php;UsedOn TClass])
-		| Public -> ":public",("Marks a class field as being public",[UsedOn TClassField])
+		| Public -> ":public",("Marks a class field as being public",[UsedOn TClassField;Internal])
 		| PublicFields -> ":publicFields",("Forces all class fields of inheriting classes to be public",[UsedOn TClass])
 		| QuotedField -> ":quotedField",("Used internally to mark structure fields which are quoted in syntax",[Internal])
 		| PrivateAccess -> ":privateAccess",("Allow private access to anything for the annotated expression",[UsedOn TExpr])
-		| Protected -> ":protected",("Marks a class field as being protected",[UsedOn TClassField])
+		| Protected -> ":protected",("Marks a class field as being protected",[UsedOn TClassField;Platforms [Cs;Java;Flash]])
 		| Property -> ":property",("Marks a property field to be compiled as a native C# property",[UsedOn TClassField;Platform Cs])
 		| Pure -> ":pure",("Marks a class field, class or expression as pure (side-effect free)",[UsedOnEither [TClass;TClassField;TExpr]])
 		| ReadOnly -> ":readOnly",("Generates a field with the 'readonly' native keyword",[Platform Cs; UsedOn TClassField])
@@ -556,7 +679,6 @@ module MetaInfo = struct
 		| Require -> ":require",("Allows access to a field only if the specified compiler flag is set",[HasParam "Compiler flag to check";UsedOn TClassField])
 		| RequiresAssign -> ":requiresAssign",("Used internally to mark certain abstract operator overloads",[Internal])
 		| Resolve -> ":resolve",("Abstract fields marked with this metadata can be used to resolve unknown fields",[UsedOn TClassField])
-		| ReplaceReflection -> ":replaceReflection",("Used internally to specify a function that should replace its internal __hx_functionName counterpart",[Platforms [Java;Cs]; UsedOnEither[TClass;TEnum]; Internal])
 		| Rtti -> ":rtti",("Adds runtime type informations",[UsedOn TClass])
 		| Runtime -> ":runtime",("?",[])
 		| RuntimeValue -> ":runtimeValue",("Marks an abstract as being a runtime value",[UsedOn TAbstract])
@@ -582,11 +704,11 @@ module MetaInfo = struct
 		| Transient -> ":transient",("Adds the 'transient' flag to the class field",[Platform Java; UsedOn TClassField])
 		| ValueUsed -> ":valueUsed",("Internally used by DCE to mark an abstract value as used",[Internal])
 		| Volatile -> ":volatile",("",[Platforms [Java;Cs]])
-		| Unbound -> ":unbound", ("Compiler internal to denote unbounded global variable",[])
+		| Unbound -> ":unbound", ("Compiler internal to denote unbounded global variable",[Internal])
 		| UnifyMinDynamic -> ":unifyMinDynamic",("Allows a collection of types to unify to Dynamic",[UsedOn TClassField])
 		| Unreflective -> ":unreflective",("",[Platform Cpp])
 		| Unsafe -> ":unsafe",("Declares a class, or a method with the C#'s 'unsafe' flag",[Platform Cs; UsedOnEither [TClass;TClassField]])
-		| Usage -> ":usage",("?",[])
+		| Usage -> ":usage",("Internal metadata used to mark a symbol for which usage request was invoked",[Internal])
 		| Used -> ":used",("Internally used by DCE to mark a class or field as used",[Internal])
 		| UserVariable -> ":userVariable",("Internally used to mark variables that come from user code",[Internal])
 		| Value -> ":value",("Used to store default values for fields and function arguments",[UsedOn TClassField])
@@ -615,6 +737,47 @@ module MetaInfo = struct
 		| ':' -> (try Hashtbl.find hmeta s with Not_found -> Custom s)
 		| '$' -> Dollar (String.sub s 1 (String.length s - 1))
 		| _ -> Custom s
+
+	let get_documentation d =
+		let t, (doc,flags) = to_string d in
+		if not (List.mem Internal flags) then begin
+			let params = ref [] and used = ref [] and pfs = ref [] in
+			List.iter (function
+				| HasParam s -> params := s :: !params
+				| Platform f -> pfs := f :: !pfs
+				| Platforms fl -> pfs := fl @ !pfs
+				| UsedOn u -> used := u :: !used
+				| UsedOnEither ul -> used := ul @ !used
+				| Internal -> assert false
+			) flags;
+			let params = (match List.rev !params with
+				| [] -> ""
+				| l -> "(" ^ String.concat "," l ^ ")"
+			) in
+			let pfs = (match List.rev !pfs with
+				| [] -> ""
+				| [p] -> " (" ^ platform_name p ^ " only)"
+				| pl -> " (for " ^ String.concat "," (List.map platform_name pl) ^ ")"
+			) in
+			let str = "@" ^ t in
+			Some (str,params ^ doc ^ pfs)
+		end else
+			None
+
+	let get_documentation_list () =
+		let m = ref 0 in
+		let rec loop i =
+			let d = Obj.magic i in
+			if d <> Meta.Last then begin match get_documentation d with
+				| None -> loop (i + 1)
+				| Some (str,desc) ->
+					if String.length str > !m then m := String.length str;
+						(str,desc) :: loop (i + 1)
+			end else
+				[]
+		in
+		let all = List.sort (fun (s1,_) (s2,_) -> String.compare s1 s2) (loop 0) in
+		all,!m
 end
 
 let stats =
@@ -733,7 +896,7 @@ let create version s_version args =
 	let defines =
 		PMap.add "true" "1" (
 		PMap.add "source-header" ("Generated by Haxe " ^ s_version) (
-		if !display_default <> DMNone then PMap.add "display" "1" PMap.empty else PMap.empty))
+		if !display_default <> DisplayMode.DMNone then PMap.add "display" "1" PMap.empty else PMap.empty))
 	in
 	{
 		version = version;
@@ -742,14 +905,18 @@ let create version s_version args =
 			shared_display_information = {
 				import_positions = PMap.empty;
 				diagnostics_messages = [];
+				type_hints = Hashtbl.create 0;
+				document_symbols = [];
+				removable_code = [];
 			}
 		};
 		display_information = {
 			unresolved_identifiers = [];
+			interface_field_implementations = [];
 		};
 		sys_args = args;
 		debug = false;
-		display = !display_default;
+		display = DisplayMode.create !display_default;
 		verbose = false;
 		foptimize = true;
 		features = Hashtbl.create 0;
@@ -812,7 +979,12 @@ let clone com =
 		main_class = None;
 		features = Hashtbl.create 0;
 		file_lookup_cache = Hashtbl.create 0;
+		parser_cache = Hashtbl.create 0 ;
 		callbacks = create_callbacks();
+		display_information = {
+			unresolved_identifiers = [];
+			interface_field_implementations = [];
+		};
 	}
 
 let file_time file =
@@ -837,32 +1009,6 @@ let file_extension file =
 	match List.rev (ExtString.String.nsplit file ".") with
 	| e :: _ -> String.lowercase e
 	| [] -> ""
-
-let platforms = [
-	Js;
-	Lua;
-	Neko;
-	Flash;
-	Php;
-	Cpp;
-	Cs;
-	Java;
-	Python;
-	Hl;
-]
-
-let platform_name = function
-	| Cross -> "cross"
-	| Js -> "js"
-	| Lua -> "lua"
-	| Neko -> "neko"
-	| Flash -> "flash"
-	| Php -> "php"
-	| Cpp -> "cpp"
-	| Cs -> "cs"
-	| Java -> "java"
-	| Python -> "python"
-	| Hl -> "hl"
 
 let flash_versions = List.map (fun v ->
 	let maj = int_of_float v in
@@ -1022,27 +1168,6 @@ let find_file ctx f =
 		| None -> raise Not_found
 		| Some f -> f)
 
-let get_full_path f = try Extc.get_full_path f with _ -> f
-
-let unique_full_path = if Sys.os_type = "Win32" || Sys.os_type = "Cygwin" then (fun f -> String.lowercase (get_full_path f)) else get_full_path
-
-let get_path_parts f =
-	let f = String.concat "/" (ExtString.String.nsplit f "\\") in
-	let cl = ExtString.String.nsplit f "." in
-	let cl = (match List.rev cl with
-		| ["hx";path] -> ExtString.String.nsplit path "/"
-		| _ -> cl
-	) in
-	cl
-
-let add_trailing_slash p =
-	let l = String.length p in
-	if l = 0 then
-		"./"
-	else match p.[l-1] with
-		| '\\' | '/' -> p
-		| _ -> p ^ "/"
-
 let rec mkdir_recursive base dir_list =
 	match dir_list with
 	| [] -> ()
@@ -1149,7 +1274,63 @@ let float_repres f =
 			Printf.sprintf "%.18g" f
 		in valid_float_lexeme float_val
 
-
 let add_diagnostics_message com s p sev =
 	let di = com.shared.shared_display_information in
 	di.diagnostics_messages <- (s,p,sev) :: di.diagnostics_messages
+
+(*
+	PurityState represents whether or not something has a side-effect. Unless otherwise stated
+	by using `@:pure` (equivalent to `@:pure(true)`) or `@:pure(false)`, fields are originally
+	supposed to be "maybe pure". Once all types and fields are known, this is refined by
+	AnalyzerTexpr.Purity.
+
+	There's a special case for fields that override a parent class field or implement an
+	interface field: If the overridden/implemented field is explicitly marked as pure,
+	the type loader marks the overriding/implementing as "expected pure". If during purity
+	inference this assumption does not hold, an error is shown.
+*)
+module PurityState = struct
+	type t =
+		| Pure
+		| Impure
+		| MaybePure
+		| ExpectPure of pos
+
+	let get_purity_from_meta meta =
+		try
+			begin match Meta.get Meta.Pure meta with
+			| (_,[EConst(Ident s),p],_) ->
+				begin match s with
+				| "true" -> Pure
+				| "false" -> Impure
+				| "expect" -> ExpectPure p
+				| _ -> error ("Unsupported purity value " ^ s ^ ", expected true or false") p
+				end
+			| (_,[],_) ->
+				Pure
+			| (_,_,p) ->
+				error "Unsupported purity value" p
+			end
+		with Not_found ->
+			MaybePure
+
+	let get_purity c cf = match get_purity_from_meta cf.cf_meta with
+		| Pure -> Pure
+		| Impure -> Impure
+		| ExpectPure p -> ExpectPure p
+		| _ -> get_purity_from_meta c.cl_meta
+
+	let is_pure c cf = get_purity c cf = Pure
+
+	let is_pure_field_access fa = match fa with
+		| FInstance(c,_,cf) | FClosure(Some(c,_),cf) | FStatic(c,cf) -> is_pure c cf
+		| FAnon cf | FClosure(None,cf) -> (get_purity_from_meta cf.cf_meta = Pure)
+		| FEnum _ -> true
+		| FDynamic _ -> false
+
+	let to_string = function
+		| Pure -> "pure"
+		| Impure -> "impure"
+		| MaybePure -> "maybe"
+		| ExpectPure _ -> "expect"
+end

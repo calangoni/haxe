@@ -790,7 +790,7 @@ let add_rtti ctx t =
 	in
 	match t with
 	| TClassDecl c when has_rtti c && not (PMap.mem "__rtti" c.cl_statics) ->
-		let f = mk_field "__rtti" ctx.t.tstring c.cl_pos in
+		let f = mk_field "__rtti" ctx.t.tstring c.cl_pos null_pos in
 		let str = Genxml.gen_type_string ctx.com t in
 		f.cf_expr <- Some (mk (TConst (TString str)) f.cf_type c.cl_pos);
 		c.cl_ordered_statics <- f :: c.cl_ordered_statics;
@@ -858,7 +858,7 @@ let add_field_inits ctx t =
 					tf_type = ctx.com.basic.tvoid;
 					tf_expr = mk (TBlock el) ctx.com.basic.tvoid c.cl_pos;
 				}) ct c.cl_pos in
-				let ctor = mk_field "new" ct c.cl_pos in
+				let ctor = mk_field "new" ct c.cl_pos null_pos in
 				ctor.cf_kind <- Method MethNormal;
 				{ ctor with cf_expr = Some ce }
 			| Some cf ->
@@ -895,7 +895,7 @@ let add_meta_field ctx t = match t with
 		| None -> ()
 		| Some e ->
 			add_feature ctx.com "has_metadata";
-			let f = mk_field "__meta__" t_dynamic c.cl_pos in
+			let f = mk_field "__meta__" t_dynamic c.cl_pos null_pos in
 			f.cf_expr <- Some e;
 			let can_deal_with_interface_metadata () = match ctx.com.platform with
 				| Flash when Common.defined ctx.com Define.As3 -> false
@@ -905,8 +905,8 @@ let add_meta_field ctx t = match t with
 			if c.cl_interface && not (can_deal_with_interface_metadata()) then begin
 				(* borrowed from gencommon, but I did wash my hands afterwards *)
 				let path = fst c.cl_path,snd c.cl_path ^ "_HxMeta" in
-				let ncls = mk_class c.cl_module path c.cl_pos in
-				let cf = mk_field "__meta__" e.etype e.epos in
+				let ncls = mk_class c.cl_module path c.cl_pos null_pos in
+				let cf = mk_field "__meta__" e.etype e.epos null_pos in
 				cf.cf_expr <- Some e;
 				ncls.cl_statics <- PMap.add "__meta__" cf ncls.cl_statics;
 				ncls.cl_ordered_statics <- cf :: ncls.cl_ordered_statics;
@@ -916,6 +916,55 @@ let add_meta_field ctx t = match t with
 				c.cl_ordered_statics <- f :: c.cl_ordered_statics;
 				c.cl_statics <- PMap.add f.cf_name f c.cl_statics
 			end)
+	| _ ->
+		()
+
+(*
+	C# events have special semantics:
+	if we have an @:event var field, there should also be add_<name> and remove_<name> methods,
+	this filter checks for their existence and also adds some metadata for analyzer and C# generator
+*)
+let check_cs_events com t = match t with
+	| TClassDecl cl when not cl.cl_extern ->
+		let check fields f =
+			match f.cf_kind with
+			| Var { v_read = AccNormal; v_write = AccNormal } when Meta.has Meta.Event f.cf_meta ->
+				if f.cf_public then error "@:event fields must be private" f.cf_pos;
+
+				(* prevent generating reflect helpers for the event in gencommon *)
+				f.cf_meta <- (Meta.SkipReflection, [], f.cf_pos) :: f.cf_meta;
+
+				(* type for both add and remove methods *)
+				let tmeth = (tfun [f.cf_type] com.basic.tvoid) in
+
+				let process_event_method name =
+					let m = try PMap.find name fields with Not_found -> error ("Missing event method: " ^ name) f.cf_pos in
+
+					(* check method signature *)
+					begin
+						try
+							type_eq EqStrict m.cf_type tmeth
+						with Unify_error el ->
+							List.iter (fun e -> com.error (Typecore.unify_error_msg (print_context()) e) m.cf_pos) el
+					end;
+
+					(*
+						add @:pure(false) to prevent purity inference, because empty add/remove methods
+						have special meaning here and they are always impure
+					*)
+					m.cf_meta <- (Meta.Pure,[EConst(Ident "false"),f.cf_pos],f.cf_pos) :: (Meta.Custom ":cs_event_impl",[],f.cf_pos) :: m.cf_meta;
+
+					(* add @:keep to event methods if the event is kept *)
+					if Meta.has Meta.Keep f.cf_meta && not (Meta.has Meta.Keep m.cf_meta) then
+						m.cf_meta <- (Meta.Keep,[],f.cf_pos) :: m.cf_meta;
+				in
+				process_event_method ("add_" ^ f.cf_name);
+				process_event_method ("remove_" ^ f.cf_name)
+			| _ ->
+				()
+		in
+		List.iter (check cl.cl_fields) cl.cl_ordered_fields;
+		List.iter (check cl.cl_statics) cl.cl_ordered_statics
 	| _ ->
 		()
 
@@ -1027,8 +1076,6 @@ let iter_expressions fl mt =
 		()
 
 let run com tctx main =
-	if not (Common.defined com Define.NoDeprecationWarnings) then
-		Codegen.DeprecationCheck.run com;
 	let new_types = List.filter (fun t -> not (is_cached t)) com.types in
 	(* PASS 1: general expression filters *)
 	let filters = [
@@ -1039,6 +1086,10 @@ let run com tctx main =
 		captured_vars com;
 	] in
 	List.iter (run_expression_filters tctx filters) new_types;
+	(* PASS 1.5: pre-analyzer type filters *)
+	List.iter (fun t ->
+		if com.platform = Cs then check_cs_events tctx.com t;
+	) new_types;
 	if com.platform <> Cross then Analyzer.Run.run_on_types tctx new_types;
 	let filters = [
 		Optimizer.sanitize com;

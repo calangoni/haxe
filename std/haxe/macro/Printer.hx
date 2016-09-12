@@ -110,7 +110,12 @@ class Printer {
 	// TODO: check if this can cause loops
 	public function printComplexType(ct:ComplexType) return switch(ct) {
 		case TPath(tp): printTypePath(tp);
-		case TFunction(args, ret): (args.length>0 ? args.map(printComplexType).join(" -> ") : "Void") + " -> " + printComplexType(ret);
+		case TFunction(args, ret):
+			function printArg(ct) return switch ct {
+				case TFunction(_): "(" + printComplexType(ct) + ")";
+				default: printComplexType(ct);
+			};
+			(args.length>0 ? args.map(printArg).join(" -> ") :"Void") + " -> " + printComplexType(ret);
 		case TAnonymous(fields): "{ " + [for (f in fields) printField(f) + "; "].join("") + "}";
 		case TParent(ct): "(" + printComplexType(ct) + ")";
 		case TOptional(ct): "?" + printComplexType(ct);
@@ -271,14 +276,7 @@ class Printer {
 					+ (interfaces != null ? (isInterface ? [for (tp in interfaces) " extends " + printTypePath(tp)] : [for (tp in interfaces) " implements " + printTypePath(tp)]).join("") : "")
 					+ " {\n"
 					+ [for (f in t.fields) {
-						var fstr = printField(f);
-						tabs + fstr + switch(f.kind) {
-							case FVar(_, _), FProp(_, _, _, _): ";";
-							case FFun({expr:null}): ";";
-							case FFun({expr:{expr:EBlock(_)}}): "";
-							case FFun(_): ";";
-							case _: "";
-						};
+						tabs + printFieldWithDelimiter(f);
 					}].join("\n")
 					+ "\n}";
 				case TDAlias(ct):
@@ -297,18 +295,24 @@ class Printer {
 					+ (to == null ? "" : [for (t in to) " to " + printComplexType(t)].join(""))
 					+ " {\n"
 					+ [for (f in t.fields) {
-						var fstr = printField(f);
-						tabs + fstr + switch(f.kind) {
-							case FVar(_, _), FProp(_, _, _, _): ";";
-							case FFun(func) if (func.expr == null): ";";
-							case _: "";
-						};
+						tabs + printFieldWithDelimiter(f);
 					}].join("\n")
 					+ "\n}";
 			}
 
 		tabs = old;
 		return str;
+	}
+
+	function printFieldWithDelimiter(f:Field):String
+	{
+		return printField(f) + switch(f.kind) {
+			case FVar(_, _), FProp(_, _, _, _): ";";
+			case FFun({expr:null}): ";";
+			case FFun({expr:{expr:EBlock(_)}}): "";
+			case FFun(_): ";";
+			case _: "";
+		};
 	}
 
 	function opt<T>(v:T, f:T->String, prefix = "") return v == null ? "" : (prefix + f(v));
